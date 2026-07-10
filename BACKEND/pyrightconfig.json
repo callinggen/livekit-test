@@ -1,0 +1,11 @@
+{
+  "pythonVersion": "3.11",
+  "venvPath": "..",
+  "venv": ".venv",
+  "extraPaths": [
+    "."
+  ],
+  "exclude": [
+    "**/__pyrefly_virtual__/**"
+  ]
+}

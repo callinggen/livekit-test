@@ -18,7 +18,7 @@ async def main():
         sip_call_to="+917075671166",
         room_name=room_name,
         participant_identity="customer",
-        participant_name="Customer",
+        participant_name="Customers",
         wait_until_answered=True,
     )
 
