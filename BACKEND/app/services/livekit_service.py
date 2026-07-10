@@ -4,7 +4,9 @@ load_dotenv()
 from livekit import api
 from livekit.protocol.sip import CreateSIPParticipantRequest
 
-TRUNK_ID = "ST_mmfofL7PdLRq"
+import os
+
+TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_mmfofL7PdLRq")
 
 
 async def make_livekit_call(
