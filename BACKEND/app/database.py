@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-DATABASE_URL = "sqlite+aiosqlite:///./callinggen.db"
+# DATABASE_URL = "sqlite+aiosqlite:///./callinggen.db"
+DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/callinggen"
+
 
 
 class Base(DeclarativeBase):
