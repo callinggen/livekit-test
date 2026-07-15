@@ -133,6 +133,19 @@ async def finish_call(
         "appointment_time": appointment_time or None,
         "recording_url": f"/api/recordings/call_{call_id}.wav" if call_id != -1 else None,
     }
+
+    # Mix WAV tracks
+    if call_id != -1:
+        try:
+            from agent import mix_wav_files
+            mix_wav_files(
+                f"recordings/call_{call_id}_customer.wav",
+                f"recordings/call_{call_id}_agent.wav",
+                f"recordings/call_{call_id}.wav"
+            )
+        except Exception as mix_err:
+            print(f"Warning – mixing audio failed: {mix_err}")
+
     try:
         print("Notifying backend that the call is complete...")
         await notify_call_complete(room_name, payload=payload)

@@ -107,12 +107,73 @@ The tool will handle the goodbye message automatically.
 """
 
 
-async def record_track(track: rtc.Track, call_id: int):
-    """Record a remote audio track (the customer) into a local WAV file."""
+import shutil
+import numpy as np
+
+
+def mix_wav_files(file1: str, file2: str, output_file: str):
+    """Mix two WAV files of the same sample rate and format into a single WAV file."""
+    try:
+        w1 = wave.open(file1, 'rb')
+        w2 = wave.open(file2, 'rb')
+    except Exception as e:
+        print(f"[mixer] Error opening files to mix: {e}")
+        # If one file fails to open, copy the other one as fallback
+        for f in (file1, file2):
+            try:
+                if os.path.exists(f):
+                    shutil.copy(f, output_file)
+                    print(f"[mixer] Copied single track {f} -> {output_file}")
+                    # Clean up the original
+                    os.remove(f)
+                    return
+            except Exception as copy_err:
+                print(f"[mixer] Copy fallback failed for {f}: {copy_err}")
+        return
+
+    try:
+        params = w1.getparams()
+        
+        f1_data = w1.readframes(w1.getnframes())
+        f2_data = w2.readframes(w2.getnframes())
+        
+        w1.close()
+        w2.close()
+        
+        # Convert to signed 16-bit PCM arrays
+        a1 = np.frombuffer(f1_data, dtype=np.int16)
+        a2 = np.frombuffer(f2_data, dtype=np.int16)
+        
+        # Pad shorter array with zeros to match lengths
+        max_len = max(len(a1), len(a2))
+        if len(a1) < max_len:
+            a1 = np.pad(a1, (0, max_len - len(a1)), 'constant')
+        if len(a2) < max_len:
+            a2 = np.pad(a2, (0, max_len - len(a2)), 'constant')
+            
+        # Sum the signals (as int32 to avoid overflow) and clip to 16-bit range
+        mixed = a1.astype(np.int32) + a2.astype(np.int32)
+        mixed = np.clip(mixed, -32768, 32767).astype(np.int16)
+        
+        out = wave.open(output_file, 'wb')
+        out.setparams(params)
+        out.writeframes(mixed.tobytes())
+        out.close()
+        print(f"[mixer] Successfully mixed {file1} and {file2} into {output_file}")
+        
+        # Clean up temporary individual files
+        os.remove(file1)
+        os.remove(file2)
+    except Exception as e:
+        print(f"[mixer] Error mixing WAV files: {e}")
+
+
+async def record_track(track: rtc.Track, call_id: int, speaker: str = "customer"):
+    """Record an audio track (customer or agent) into a local WAV file."""
     os.makedirs("recordings", exist_ok=True)
-    filename = f"recordings/call_{call_id}.wav"
+    filename = f"recordings/call_{call_id}_{speaker}.wav"
     
-    print(f"[recorder] Started recording customer track for call {call_id} -> {filename}")
+    print(f"[recorder] Started recording {speaker} track for call {call_id} -> {filename}")
     audio_stream = rtc.AudioStream(track)
     wav_file = None
     try:
@@ -125,11 +186,11 @@ async def record_track(track: rtc.Track, call_id: int):
                 wav_file.setframerate(frame.sample_rate)
             wav_file.writeframes(frame.data)
     except Exception as e:
-        print(f"[recorder] Error recording call {call_id}: {e}")
+        print(f"[recorder] Error recording {speaker} for call {call_id}: {e}")
     finally:
         if wav_file:
             wav_file.close()
-        print(f"[recorder] Finished recording customer track for call {call_id}")
+        print(f"[recorder] Finished recording {speaker} track for call {call_id}")
 
 
 class DynamicAgent(Agent):
@@ -237,6 +298,17 @@ async def entrypoint(ctx: JobContext):
             session = state.get("session")
             transcript = _build_transcript(session) if session else ""
 
+            # Mix WAV tracks
+            if call_id != -1:
+                try:
+                    mix_wav_files(
+                        f"recordings/call_{call_id}_customer.wav",
+                        f"recordings/call_{call_id}_agent.wav",
+                        f"recordings/call_{call_id}.wav"
+                    )
+                except Exception as mix_err:
+                    print(f"Warning – mixing audio failed: {mix_err}")
+
             await notify_call_complete(
                 room_name,
                 payload={
@@ -301,6 +373,22 @@ async def entrypoint(ctx: JobContext):
         )
 
         print("Session started")
+
+        # Identify the local agent track to record it as well
+        agent_track = None
+        for _ in range(30):  # Wait up to 3 seconds
+            for pub in ctx.room.local_participant.track_publications.values():
+                if pub.track and pub.track.kind == rtc.TrackKind.KIND_AUDIO:
+                    agent_track = pub.track
+                    break
+            if agent_track:
+                break
+            await asyncio.sleep(0.1)
+
+        if agent_track:
+            asyncio.create_task(record_track(agent_track, call_id, speaker="agent"))
+        else:
+            print("[agent] Warning: local agent audio track not found for recording")
 
         ACTIVE_CALLS[ctx.room.name] = {
             "session": session,
