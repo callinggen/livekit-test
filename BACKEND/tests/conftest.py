@@ -1,4 +1,5 @@
 import asyncio
+from typing import AsyncGenerator
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -28,7 +29,7 @@ async def test_engine():
 
 
 @pytest_asyncio.fixture
-async def db_session(test_engine) -> AsyncSession:
+async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     async_session = async_sessionmaker(
         bind=test_engine,
         class_=AsyncSession,
@@ -40,7 +41,7 @@ async def db_session(test_engine) -> AsyncSession:
 
 
 @pytest_asyncio.fixture
-async def client(db_session) -> AsyncClient:
+async def client(db_session) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_db():
         yield db_session
 

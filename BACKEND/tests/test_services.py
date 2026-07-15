@@ -96,6 +96,7 @@ async def test_call_service_complete_and_fail(db_session: AsyncSession):
         appointment_date="2026-07-15",
         appointment_time="15:00"
     )
+    assert call1 is not None
     assert call1.status == "completed"
     assert contact.status == "completed"
     assert contact.customer_name == "Bob Jr"
@@ -124,6 +125,7 @@ async def test_call_service_complete_and_fail(db_session: AsyncSession):
     
     # Test fail_call on Call 2
     call2 = await CallService.fail_call(db=db_session, call_id=call2.id)
+    assert call2 is not None
     assert call2.status == "failed"
     assert contact2.status == "failed"
     assert job.failed_contacts == 1
