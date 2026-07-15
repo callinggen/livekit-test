@@ -131,7 +131,7 @@ async def finish_call(
         "customer_name": customer_name or None,
         "appointment_date": appointment_date or None,
         "appointment_time": appointment_time or None,
-        "recording_url": f"/recordings/call_{call_id}.wav" if call_id != -1 else None,
+        "recording_url": f"/api/recordings/call_{call_id}.wav" if call_id != -1 else None,
     }
     try:
         print("Notifying backend that the call is complete...")

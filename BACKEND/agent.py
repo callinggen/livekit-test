@@ -237,7 +237,7 @@ async def entrypoint(ctx: JobContext):
                     "customer_name": None,
                     "appointment_date": None,
                     "appointment_time": None,
-                    "recording_url": f"/recordings/call_{call_id}.wav",
+                    "recording_url": f"/api/recordings/call_{call_id}.wav",
                 },
             )
 

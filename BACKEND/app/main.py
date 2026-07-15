@@ -13,7 +13,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-app.mount("/recordings", StaticFiles(directory="recordings"), name="recordings")
+app.mount("/api/recordings", StaticFiles(directory="recordings"), name="recordings")
 
 app.add_middleware(
     CORSMiddleware,
