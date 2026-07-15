@@ -1,12 +1,13 @@
 from dotenv import load_dotenv
 import asyncio
 import os
+import wave
 
 from app.services.conversation_state import ACTIVE_CALLS
 from backend_client import notify_call_complete
 from finish_call import finish_call, _build_transcript
 
-from livekit import rtc
+from livekit import api, rtc
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -106,6 +107,92 @@ The tool will handle the goodbye message automatically.
 """
 
 
+import shutil
+import numpy as np
+
+
+def mix_wav_files(file1: str, file2: str, output_file: str):
+    """Mix two WAV files of the same sample rate and format into a single WAV file."""
+    try:
+        w1 = wave.open(file1, 'rb')
+        w2 = wave.open(file2, 'rb')
+    except Exception as e:
+        print(f"[mixer] Error opening files to mix: {e}")
+        # If one file fails to open, copy the other one as fallback
+        for f in (file1, file2):
+            try:
+                if os.path.exists(f):
+                    shutil.copy(f, output_file)
+                    print(f"[mixer] Copied single track {f} -> {output_file}")
+                    # Clean up the original
+                    os.remove(f)
+                    return
+            except Exception as copy_err:
+                print(f"[mixer] Copy fallback failed for {f}: {copy_err}")
+        return
+
+    try:
+        params = w1.getparams()
+        
+        f1_data = w1.readframes(w1.getnframes())
+        f2_data = w2.readframes(w2.getnframes())
+        
+        w1.close()
+        w2.close()
+        
+        # Convert to signed 16-bit PCM arrays
+        a1 = np.frombuffer(f1_data, dtype=np.int16)
+        a2 = np.frombuffer(f2_data, dtype=np.int16)
+        
+        # Pad shorter array with zeros to match lengths
+        max_len = max(len(a1), len(a2))
+        if len(a1) < max_len:
+            a1 = np.pad(a1, (0, max_len - len(a1)), 'constant')
+        if len(a2) < max_len:
+            a2 = np.pad(a2, (0, max_len - len(a2)), 'constant')
+            
+        # Sum the signals (as int32 to avoid overflow) and clip to 16-bit range
+        mixed = a1.astype(np.int32) + a2.astype(np.int32)
+        mixed = np.clip(mixed, -32768, 32767).astype(np.int16)
+        
+        out = wave.open(output_file, 'wb')
+        out.setparams(params)
+        out.writeframes(mixed.tobytes())
+        out.close()
+        print(f"[mixer] Successfully mixed {file1} and {file2} into {output_file}")
+        
+        # Clean up temporary individual files
+        os.remove(file1)
+        os.remove(file2)
+    except Exception as e:
+        print(f"[mixer] Error mixing WAV files: {e}")
+
+
+async def record_track(track: rtc.Track, call_id: int, speaker: str = "customer"):
+    """Record an audio track (customer or agent) into a local WAV file."""
+    os.makedirs("recordings", exist_ok=True)
+    filename = f"recordings/call_{call_id}_{speaker}.wav"
+    
+    print(f"[recorder] Started recording {speaker} track for call {call_id} -> {filename}")
+    audio_stream = rtc.AudioStream(track)
+    wav_file = None
+    try:
+        async for frame_event in audio_stream:
+            frame = frame_event.frame
+            if wav_file is None:
+                wav_file = wave.open(filename, 'wb')
+                wav_file.setnchannels(frame.num_channels)
+                wav_file.setsampwidth(2)  # 16-bit PCM is 2 bytes
+                wav_file.setframerate(frame.sample_rate)
+            wav_file.writeframes(frame.data)
+    except Exception as e:
+        print(f"[recorder] Error recording {speaker} for call {call_id}: {e}")
+    finally:
+        if wav_file:
+            wav_file.close()
+        print(f"[recorder] Finished recording {speaker} track for call {call_id}")
+
+
 class DynamicAgent(Agent):
     """Agent whose behaviour is fully driven by the campaign configuration."""
 
@@ -153,10 +240,6 @@ async def entrypoint(ctx: JobContext):
     print("JOB RECEIVED")
     print("=" * 60)
 
-    await ctx.connect()
-
-    print(f"Connected to room: {ctx.room.name}")
-
     room_name = ctx.room.name
 
     # ── Extract call_id from room name (format: "call-{call_id}") ────────────
@@ -166,69 +249,119 @@ async def entrypoint(ctx: JobContext):
         call_id = -1
         print(f"[agent] Warning: could not parse call_id from room name: {room_name}")
 
-    # ── Fetch campaign info to drive the agent's behaviour ───────────────────
-    campaign_info = await _get_campaign_info(call_id)
-    agent_type    = campaign_info["agent_type"]
-    custom_script = campaign_info["script"]
-    customer_name = campaign_info["customer_name"]
-
-    print(f"[agent] Agent type   : {agent_type}")
-    print(f"[agent] Customer name: {customer_name}")
-    print(f"[agent] Script length: {len(custom_script)} chars")
-
-    # This event is set when the room disconnects (i.e. when finish_call
-    # deletes the room), which lets the entrypoint exit cleanly.
+    # Register event listeners BEFORE connecting to ensure we don't miss early events
     shutdown_event = asyncio.Event()
 
     @ctx.room.on("disconnected")
     def on_room_disconnected(*args):
         shutdown_event.set()
 
-    async def _handle_unexpected_disconnect(reason: str):
-        # If finish_call already ran, ACTIVE_CALLS entry is already gone.
-        state = ACTIVE_CALLS.pop(room_name, None)
-        if state is None:
-            return
-
-        print(
-            f"Customer disconnected before finish_call ran ({reason}). "
-            f"Notifying backend so the campaign can continue."
-        )
-
-        # Try to save a partial transcript even for unexpected disconnects.
-        session = state.get("session")
-        transcript = _build_transcript(session) if session else ""
-
-        await notify_call_complete(
-            room_name,
-            payload={
-                "transcript": transcript or None,
-                "customer_name": None,
-                "appointment_date": None,
-                "appointment_time": None,
-            },
-        )
-
-    @ctx.room.on("participant_disconnected")
-    def on_participant_disconnected(participant: rtc.RemoteParticipant):
-        if participant.identity == "customer":
-            asyncio.create_task(
-                _handle_unexpected_disconnect("customer hung up")
-            )
-
-    session = AgentSession(
-        stt=sarvam.STT(),
-
-        llm=openai.LLM(
-            model="deepseek-chat",
-            api_key=os.getenv("DEEPSEEK_API_KEY") or "",
-            base_url="https://api.deepseek.com/v1",
-        ),
-
-        tts=sarvam.TTS(),
-    )
+    @ctx.room.on("track_subscribed")
+    def on_track_subscribed(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant):
+        if track.kind == rtc.TrackKind.KIND_AUDIO and participant.identity == "customer":
+            asyncio.create_task(record_track(track, call_id))
 
     try:
+        await ctx.connect()
+        print(f"Connected to room: {ctx.room.name}")
+
+        # Scan for already subscribed audio tracks from pre-existing customer participant
+        for participant in ctx.room.remote_participants.values():
+            if participant.identity == "customer":
+                for publication in participant.track_publications.values():
+                    if publication.subscribed and publication.track and publication.track.kind == rtc.TrackKind.KIND_AUDIO:
+                        print(f"[recorder] Found pre-existing subscribed customer audio track: {publication.track.sid}")
+                        asyncio.create_task(record_track(publication.track, call_id))
+
+        # ── Fetch campaign info to drive the agent's behaviour ───────────────────
+        campaign_info = await _get_campaign_info(call_id)
+        agent_type    = campaign_info["agent_type"]
+        custom_script = campaign_info["script"]
+        customer_name = campaign_info["customer_name"]
+
+        print(f"[agent] Agent type   : {agent_type}")
+        print(f"[agent] Customer name: {customer_name}")
+        print(f"[agent] Script length: {len(custom_script)} chars")
+
+        async def _handle_unexpected_disconnect(reason: str):
+            # If finish_call already ran, ACTIVE_CALLS entry is already gone.
+            state = ACTIVE_CALLS.pop(room_name, None)
+            if state is None:
+                return
+
+            print(
+                f"Customer disconnected before finish_call ran ({reason}). "
+                f"Notifying backend so the campaign can continue."
+            )
+
+            # Try to save a partial transcript even for unexpected disconnects.
+            session = state.get("session")
+            transcript = _build_transcript(session) if session else ""
+
+            # Mix WAV tracks
+            if call_id != -1:
+                try:
+                    mix_wav_files(
+                        f"recordings/call_{call_id}_customer.wav",
+                        f"recordings/call_{call_id}_agent.wav",
+                        f"recordings/call_{call_id}.wav"
+                    )
+                except Exception as mix_err:
+                    print(f"Warning – mixing audio failed: {mix_err}")
+
+            await notify_call_complete(
+                room_name,
+                payload={
+                    "transcript": transcript or None,
+                    "customer_name": None,
+                    "appointment_date": None,
+                    "appointment_time": None,
+                    "recording_url": f"/api/recordings/call_{call_id}.wav",
+                },
+            )
+
+            # Close the agent session cleanly
+            if session:
+                try:
+                    print("Closing AgentSession...")
+                    await asyncio.wait_for(session.aclose(), timeout=5.0)
+                    print("AgentSession closed.")
+                except Exception as e:
+                    print(f"Warning – session.aclose() error: {e}")
+
+            # Delete the LiveKit room to hang up the SIP call
+            try:
+                print("Deleting LiveKit room (this hangs up the SIP call)...")
+                lkapi = api.LiveKitAPI()
+                try:
+                    await lkapi.room.delete_room(
+                        api.DeleteRoomRequest(room=room_name)
+                    )
+                    print("Room deleted successfully.")
+                finally:
+                    await lkapi.aclose()
+            except Exception as e:
+                print(f"Warning – room deletion error: {e}")
+
+
+        @ctx.room.on("participant_disconnected")
+        def on_participant_disconnected(participant: rtc.RemoteParticipant):
+            if participant.identity == "customer":
+                asyncio.create_task(
+                    _handle_unexpected_disconnect("customer hung up")
+                )
+
+        session = AgentSession(
+            stt=sarvam.STT(),
+
+            llm=openai.LLM(
+                model="deepseek-chat",
+                api_key=os.getenv("DEEPSEEK_API_KEY") or "",
+                base_url="https://api.deepseek.com/v1",
+            ),
+
+            tts=sarvam.TTS(),
+        )
 
         await session.start(
             room=ctx.room,
@@ -240,6 +373,22 @@ async def entrypoint(ctx: JobContext):
         )
 
         print("Session started")
+
+        # Identify the local agent track to record it as well
+        agent_track = None
+        for _ in range(30):  # Wait up to 3 seconds
+            for pub in ctx.room.local_participant.track_publications.values():
+                if pub.track and pub.track.kind == rtc.TrackKind.KIND_AUDIO:
+                    agent_track = pub.track
+                    break
+            if agent_track:
+                break
+            await asyncio.sleep(0.1)
+
+        if agent_track:
+            asyncio.create_task(record_track(agent_track, call_id, speaker="agent"))
+        else:
+            print("[agent] Warning: local agent audio track not found for recording")
 
         ACTIVE_CALLS[ctx.room.name] = {
             "session": session,
@@ -296,6 +445,18 @@ async def entrypoint(ctx: JobContext):
         await shutdown_event.wait()
 
         print("Entrypoint shutting down.")
+
+    except Exception as e:
+        print(f"[agent] Fatal error in entrypoint: {e}")
+        if call_id != -1:
+            try:
+                from app.services.call_service import CallService
+                async with AsyncSessionLocal() as db:
+                    await CallService.fail_call(db=db, call_id=call_id)
+                    print(f"[agent] Call {call_id} marked as failed in DB due to crash.")
+            except Exception as db_err:
+                print(f"[agent] Failed to mark call {call_id} as failed in DB: {db_err}")
+        raise e
 
     finally:
         # Safety cleanup in case finish_call never ran (e.g. connection error).

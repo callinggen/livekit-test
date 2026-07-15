@@ -1,13 +1,20 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.api.campaigns import router as campaign_router
 from app.api.calls import router as call_router
 from app.api.auth import router as auth_router
+
+# Ensure recordings directory exists
+os.makedirs("recordings", exist_ok=True)
 
 app = FastAPI(
     title="Calling Platform API",
     version="1.0.0",
 )
+
+app.mount("/api/recordings", StaticFiles(directory="recordings"), name="recordings")
 
 app.add_middleware(
     CORSMiddleware,

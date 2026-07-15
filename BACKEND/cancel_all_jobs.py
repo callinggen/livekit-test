@@ -15,6 +15,7 @@ from app.database import AsyncSessionLocal
 from app.models.call import Call
 from app.models.job import Job
 from app.models.contact import Contact
+from app.models.campaign import Campaign
 
 
 async def cancel_all():
@@ -51,6 +52,11 @@ async def cancel_all():
             print(f"Cancelling Job {job.id} (status={job.status})")
             job.status = "cancelled"
             job.finished_at = now
+
+            campaign = await db.get(Campaign, job.campaign_id)
+            if campaign:
+                campaign.status = "failed"
+                print(f"  -> Campaign {campaign.id} ('{campaign.campaign_name}') status set to failed")
 
         await db.commit()
         print(f"\nDone — failed {len(stale_calls)} call(s), cancelled {len(active_jobs)} job(s).")

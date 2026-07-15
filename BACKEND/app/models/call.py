@@ -63,3 +63,8 @@ class Call(Base):
         String,
         nullable=True,
     )
+
+    recording_url: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
