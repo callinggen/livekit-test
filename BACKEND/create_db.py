@@ -7,6 +7,7 @@ from app.models.campaign import Campaign
 from app.models.contact import Contact
 from app.models.job import Job
 from app.models.call import Call
+from app.models.user import User
 import app.models
 
 
