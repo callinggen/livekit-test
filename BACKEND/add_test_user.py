@@ -1,26 +1,43 @@
 import asyncio
+from sqlalchemy.future import select
 from app.database import AsyncSessionLocal
 from app.models.user import User
 from app.core.security import get_password_hash
 
 async def add_test_user():
-    async with AsyncSessionLocal() as session:
-        # Check if user already exists
-        from sqlalchemy.future import select
-        result = await session.execute(select(User).filter_by(email="khushipanwargzb@gmail.com"))
-        user = result.scalars().first()
+    print("Creating test users...")
+    
+    
+    email1 = "khushipanwar690@gmail.com"
+    phone1 = "8595996586"
+    password = "khushi123"
+    full_name1 = "Khushi Panwar"
+    
+    async with AsyncSessionLocal() as db:
+        # Check and create User 1
+        stmt = select(User).where(User.email == email1)
+        result = await db.execute(stmt)
+        user1 = result.scalars().first()
         
-        if not user:
-            new_user = User(
-                email="khushipanwargzb@gmail.com",
-                phone_number="7983426551",
-                hashed_password=get_password_hash("khushi123")
+        if not user1:
+            hashed_password = get_password_hash(password)
+            user1 = User(
+                email=email1,
+                phone_number=phone1,
+                hashed_password=hashed_password,
+                full_name=full_name1
             )
-            session.add(new_user)
-            await session.commit()
-            print("Test user created: khushipanwargzb@gmail.com")
+            db.add(user1)
+            print(f"Added {email1} ({full_name1})")
         else:
-            print("Test user already exists.")
+            print(f"User {email1} already exists.")
+            # Update name if missing
+            if not user1.full_name:
+                user1.full_name = full_name1
+                print(f"Updated {email1} with full_name {full_name1}")
+
+        await db.commit()
+    print("Done!")
 
 if __name__ == "__main__":
     asyncio.run(add_test_user())

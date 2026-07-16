@@ -81,6 +81,17 @@ async def complete_call(
     return {"success": True, "call_id": call.id}
 
 
+@router.post("/calls/{call_id}/fail")
+async def fail_call_endpoint(
+    call_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    call = await CallService.fail_call(db=db, call_id=call_id)
+    if call is None:
+        return {"success": False, "message": "Call not found"}
+    return {"success": True, "call_id": call.id}
+
+
 # ── GET /api/calls ──────────────────────────────────────────────────────────
 
 @router.get("/calls")

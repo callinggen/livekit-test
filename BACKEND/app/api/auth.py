@@ -46,6 +46,7 @@ async def login(
     return {
         "access_token": create_access_token(user.id),
         "token_type": "bearer",
+        "full_name": user.full_name,
     }
 
 @router.post("/forgot-password")

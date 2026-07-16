@@ -42,3 +42,22 @@ async def notify_call_complete(
         print(f"[backend_client] Failed to notify backend for call {call_id}: {e}")
         return False
 
+async def notify_call_failed(
+    call_id: int,
+) -> bool:
+    """
+    Tell the FastAPI backend that the call has failed (due to agent crash or SIP error)
+    """
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000").rstrip("/")
+    url = f"{backend_url}/api/calls/{call_id}/fail"
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url)
+            resp.raise_for_status()
+            print(f"[backend_client] Backend notified: call {call_id} marked failed.")
+            return True
+    except Exception as e:
+        print(f"[backend_client] Failed to notify backend of failure for call {call_id}: {e}")
+        return False
+

@@ -450,12 +450,10 @@ async def entrypoint(ctx: JobContext):
         print(f"[agent] Fatal error in entrypoint: {e}")
         if call_id != -1:
             try:
-                from app.services.call_service import CallService
-                async with AsyncSessionLocal() as db:
-                    await CallService.fail_call(db=db, call_id=call_id)
-                    print(f"[agent] Call {call_id} marked as failed in DB due to crash.")
+                from backend_client import notify_call_failed
+                await notify_call_failed(call_id=call_id)
             except Exception as db_err:
-                print(f"[agent] Failed to mark call {call_id} as failed in DB: {db_err}")
+                print(f"[agent] Failed to notify backend of call {call_id} failure: {db_err}")
         raise e
 
     finally:
