@@ -6,7 +6,8 @@ from livekit.protocol.sip import CreateSIPParticipantRequest
 
 import os
 
-TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_mmfofL7PdLRq")
+# TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_mmfofL7PdLRq")
+TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_rzSGSXpSKjto")
 
 
 async def make_livekit_call(

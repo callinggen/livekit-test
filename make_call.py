@@ -5,7 +5,8 @@ from livekit import api
 from livekit.protocol.sip import CreateSIPParticipantRequest
 
 
-TRUNK_ID = "ST_mmfofL7PdLRq"
+# TRUNK_ID = "ST_mmfofL7PdLRq"
+TRUNK_ID = "ST_rzSGSXpSKjto"
 
 
 async def main():

@@ -18,3 +18,15 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class VerifyResetCodeRequest(BaseModel):
+    email: str
+    reset_code: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    reset_code: str
+    new_password: str
