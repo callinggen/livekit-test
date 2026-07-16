@@ -22,41 +22,40 @@ async def worker():
                 .order_by(Job.id)
             )
 
-            job = result.scalars().first()
+            jobs = result.scalars().all()
 
-            if job is None:
+            if not jobs:
                 print("Found 0 active jobs")
-
             else:
-                # Save the ID before any database operations
-                job_id = job.id
+                for job in jobs:
+                    # Save the ID before any database operations
+                    job_id = job.id
 
-                try:
-                    print(f"Processing Job {job_id}")
+                    try:
+                        print(f"Processing Job {job_id}")
 
-                    job.status = "processing"
-                    await db.commit()
+                        if job.status == "queued":
+                            job.status = "processing"
+                            await db.commit()
 
-                    call_started = await QueueService.process_job(
-                        db=db,
-                        job_id=job_id,
-                    )
+                        call_started = await QueueService.process_job(
+                            db=db,
+                            job_id=job_id,
+                        )
 
-                    if not call_started:
-                        print(f"Job {job_id} completed")
+                        if not call_started:
+                            print(f"Job {job_id} completed or no pending contacts")
 
-                except Exception as e:
-                    # Reset the SQLAlchemy session
-                    await db.rollback()
+                    except Exception as e:
+                        # Reset the SQLAlchemy session
+                        await db.rollback()
+                        print(f"Error processing job {job_id}: {e}")
 
-                    print(f"Error processing job {job_id}: {e}")
-
-                    # Reload the job after rollback
-                    job = await db.get(Job, job_id)
-
-                    if job:
-                        job.status = "failed"
-                        await db.commit()
+                        # Reload the job after rollback
+                        job_reload = await db.get(Job, job_id)
+                        if job_reload:
+                            job_reload.status = "failed"
+                            await db.commit()
 
         await asyncio.sleep(5)
 
